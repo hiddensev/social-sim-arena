@@ -9,6 +9,7 @@ from unittest.mock import Mock, patch
 
 from ssa import baselines, harness, jev, personas, series
 from tools import run_jev_backtest as runner
+from tools import replay_jev_probabilities as offline
 
 
 def response_for(request):
@@ -93,7 +94,7 @@ class JevTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 jev.probabilities({"type": "choice", "choice": "a", "probabilities": ps}, ["a", "b"])
 
-    def test_persona_exact_instrument_and_hard_answers(self):
+    def test_persona_exact_instrument_and_probability_answers(self):
         spec = series.survey("umich_sentiment")
         prompt = harness.build_persona_prompt(personas.panel()[0], spec)
         req, edges = jev.request_for(prompt, "jev-1.13.0")
@@ -102,8 +103,86 @@ class JevTests(unittest.TestCase):
             self.assertEqual(req["questions"][item["key"]]["instructions"], item["text"])
             self.assertEqual(list(req["questions"][item["key"]]["criteria"]), item["options"])
         converted = jev.convert(response_for(req), req, edges)
-        self.assertEqual(harness.parse_survey_reply(json.dumps(converted), spec), converted)
+        self.assertEqual(jev.parse_persona_reply(json.dumps(converted), spec), converted)
+        with self.assertRaises(ValueError):
+            harness.parse_survey_reply(json.dumps(converted), spec)
         self.assertNotIn("Recent published", req["state"])
+
+    def test_probability_reply_rejects_hard_answers_and_invalid_vectors(self):
+        spec = series.survey("yougov_approval")
+        bad = ["approve", {"approve": 1},
+               {"approve": .6, "disapprove": .2, "not sure": .1},
+               {"approve": True, "disapprove": 0, "not sure": 0},
+               {"approve": float("nan"), "disapprove": 0, "not sure": 0}]
+        for value in bad:
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                jev.parse_persona_reply(json.dumps({"approval": value}), spec)
+
+    def test_affine_aggregate_matches_expectation_of_correlated_hard_panels(self):
+        # Two mutually exclusive whole-panel scenarios: strong correlation
+        # across people and Michigan items. Marginals suffice for the mean.
+        weights = {"p1": .27, "p2": .73}
+        for sid in runner.DEFAULT_SERIES:
+            spec = series.survey(sid)
+            scenarios = [
+                {pid: {i["key"]: i["options"][(which + n) % 3]
+                       for i in spec["items"]}
+                 for n, pid in enumerate(weights)} for which in (0, 2)]
+            ps = {pid: {i["key"]: {o: sum(p for p, s in zip((.35, .65), scenarios)
+                                            if s[pid][i["key"]] == o)
+                                  for o in i["options"]} for i in spec["items"]}
+                  for pid in weights}
+            expected = sum(p * personas.aggregate(spec["aggregate"], s, weights)
+                           for p, s in zip((.35, .65), scenarios))
+            self.assertAlmostEqual(jev.aggregate_persona_probabilities(spec["aggregate"], ps, weights), expected)
+        with self.assertRaises(ValueError):
+            jev.aggregate_persona_probabilities("nonlinear_unreviewed", {}, {})
+
+    def test_soft_persona_preserves_probability_instead_of_argmax(self):
+        def soft_http(url, **kwargs):
+            data = response_for(kwargs["json"])
+            data["answers"]["approval"].update(choice="approve", probabilities={
+                "approve": .6, "disapprove": .35, "not sure": .05})
+            return Mock(status_code=200, json=lambda: data)
+        with patch.object(personas, "REPLICATES", 1), patch("ssa.jev.requests.post", side_effect=soft_http) as post:
+            forecast = harness.forecast("jev-zeroshot-persona", self.round, self.history)
+            self.assertEqual(post.call_count, 24)
+            self.assertAlmostEqual(forecast["topline"]["mean"], 60)  # argmax would give 100
+            self.assertEqual(forecast["topline"]["sd"], personas.sd_for(personas.weights_for("A"), self.history))
+            self.assertIn("response=probability-expectation-v2", forecast["notes"])
+            again = harness.forecast("jev-zeroshot-persona", self.round, self.history)
+            self.assertEqual(forecast["topline"], again["topline"])
+            self.assertEqual(post.call_count, 24)
+
+    def test_only_persona_adapter_identity_changes(self):
+        direct = harness.call_identity("jev")
+        soft = harness.call_identity("jev-zeroshot-persona")
+        with patch.dict(harness.MODELS["jev"], {"persona_params": {}}):
+            self.assertEqual(direct, harness.call_identity("jev"))
+            self.assertEqual(direct, harness.call_identity("jev-zeroshot-persona"))
+        self.assertNotEqual(direct, soft)
+
+    def test_offline_reconversion_checks_original_request_and_prompt(self):
+        spec = series.survey("yougov_approval")
+        prompt = harness.build_persona_prompt(personas.panel()[0], spec)
+        req, _ = jev.request_for(prompt, "jev-1.13.0")
+        response = response_for(req)
+        source = {"entrant": "jev-zeroshot-persona", "round_id": "test-round", "persona": "p000",
+                  "model": "jev-1.13.0", "input_hash": "old-hash",
+                  "prompt_sha256": harness.replies.prompt_sha256(prompt),
+                  "reply": '{"approval":"approve"}',
+                  "usage": {"jev": {"request": req, "response": response}}}
+        args = ("jev-zeroshot-persona", "test-round", "p000", prompt, "new-hash")
+        converted = offline.convert_record(source, *args)
+        self.assertIsInstance(json.loads(converted["reply"])["approval"], dict)
+        self.assertEqual(converted["derived_from"]["input_hash"], "old-hash")
+        self.assertEqual(source["input_hash"], "old-hash")
+        self.assertEqual(source["reply"], '{"approval":"approve"}')
+        with self.assertRaises(ValueError):
+            offline.convert_record(dict(source, prompt_sha256="wrong"), *args)
+        source["usage"]["jev"]["request"] = dict(req, state="a different persona")
+        with self.assertRaises(ValueError):
+            offline.convert_record(source, *args)
 
     def test_unsupported_methods_and_shapes_fail_before_http(self):
         with self.assertRaises(KeyError):

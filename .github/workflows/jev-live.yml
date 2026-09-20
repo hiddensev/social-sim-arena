@@ -37,8 +37,8 @@ jobs:
       - uses: actions/cache/restore@v4
         with:
           path: .local/jev/encrypted/state.age
-          key: jev-live-v1-${{ github.run_id }}-${{ github.run_attempt }}
-          restore-keys: jev-live-v1-
+          key: jev-live-v2-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: jev-live-v2-
       - name: Restore private evidence
         id: private_restore
         run: python tools/jev_live_cache.py unpack
@@ -52,4 +52,4 @@ jobs:
         if: always() && steps.private_pack.outcome == 'success'
         with:
           path: .local/jev/encrypted/state.age
-          key: jev-live-v1-${{ github.run_id }}-${{ github.run_attempt }}
+          key: jev-live-v2-${{ github.run_id }}-${{ github.run_attempt }}

@@ -110,8 +110,9 @@ def main():
     count = len(tasks) * (1 + len(personas.panel()))
     report = {"status": "planned", "model": harness.model_id("jev"),
               "call_identity": harness.call_identity("jev"),
+              "persona_call_identity": harness.call_identity("jev-zeroshot-persona"),
               "training_cutoff": None, "evaluation": "historical-functional-only",
-              "persona_mode": "hard-choice; original aggregation and sd",
+              "persona_mode": "probability-expectation-v2; original survey formula and sd",
               "replicates": personas.REPLICATES,
               "upstream_commit": subprocess.check_output(
                   ["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip(),

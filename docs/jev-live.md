@@ -2,6 +2,9 @@
 
 Entrants: **jev-direct** and **jev-persona**, owned by `hiddensev`.
 Both use TypeSafe official `jev-1.13.0` and the closed information condition.
+Persona is fixed to `jev-persona-expectation-v2` in the live configuration.
+This supersedes the initial argmax mapping before registration or any public
+forecasts; live cache keys use the new v2 namespace.
 [Adapter details and historical limitations](jev-local.md).
 
 ## Fixed experiment
@@ -10,7 +13,9 @@ Both use TypeSafe official `jev-1.13.0` and the closed information condition.
 Direct = `jev` (recent 10 observations); Persona = `jev-zeroshot-persona`
 (the original 24 × 8 panel). Scope is YouGov approval, Civiqs net approval,
 and University of Michigan sentiment. No Superforecasting, profiles, rankings,
-news, or web arm. Only the provider and required output conversion change.
+news, or web arm. The provider and required output conversion change. Persona v2 integrates the
+full option probabilities through the original affine survey formulas, instead
+of selecting argmax. The original sd formula remains unchanged.
 The live runner additionally refuses incomplete Persona panels.
 
 The runner reads official questions, registrations, resolutions and answer
@@ -63,7 +68,7 @@ backtest is not uploaded as prospective competition evidence.
 
 ## Validation record
 
-The 24 Jev adapter/live tests and the original Persona, condition, route,
+The 29 Jev adapter/live tests and the original Persona, condition, route,
 reply, cutoff and model-backtest-run checks pass. The expanded signed-intake
 suite has one existing documentation assertion failure:
 `ClientDefaults.test_the_documented_command_is_the_one_that_works` expects

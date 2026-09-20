@@ -2,7 +2,7 @@
 
 Direct: 200 equal-width bins on the survey's theoretical support, interpreted
 as a mixture of uniforms, moment-matched to the arena's normal contract.
-Persona: retain Jev's selected answer, exactly as the baseline survey expects.
+Persona: integrate the categorical probabilities through the survey aggregate.
 The entire typed request/response is retained in the harness's usage log.
 """
 import json
@@ -17,11 +17,8 @@ import requests
 BINS = 200
 
 
-def probabilities(answer, options):
-    """Validate the complete distribution and bounded API quantization error."""
-    if not isinstance(answer, dict) or answer.get("type") != "choice":
-        raise ValueError("Jev must return a Choice answer")
-    ps = answer.get("probabilities")
+def probability_vector(ps, options, api_quantization=False):
+    """Validate all options; only raw provider output permits API quantization."""
     if not isinstance(ps, dict) or set(ps) != set(options):
         raise ValueError("Jev probabilities must cover exactly the requested options")
     if any(isinstance(v, bool) or not isinstance(v, (float, int))
@@ -31,14 +28,58 @@ def probabilities(answer, options):
     # Observed official API responses round each probability to hundredths
     # and can total 0.99. Allow at most one percentage point of missing/extra
     # mass, only for that quantized format; never repair arbitrary bad totals.
-    quantized = all(abs(v * 100 - round(v * 100)) < 1e-8 for v in ps.values())
-    tolerance = 0.0100000001 if quantized else 1e-5
+    quantized = api_quantization and all(abs(v * 100 - round(v * 100)) < 1e-8 for v in ps.values())
+    tolerance = (0.0100000001 if quantized else 1e-5) if api_quantization else 1e-9
     if not math.isclose(total, 1.0, abs_tol=tolerance, rel_tol=0):
         raise ValueError(f"Jev probabilities sum to {total:.12g}, expected 1")
+    return {k: ps[k] / total for k in options}
+
+
+def probabilities(answer, options):
+    """Validate the complete distribution and bounded API quantization error."""
+    if not isinstance(answer, dict) or answer.get("type") != "choice":
+        raise ValueError("Jev must return a Choice answer")
+    normalized = probability_vector(answer.get("probabilities"), options, api_quantization=True)
+    ps = answer["probabilities"]
     choice = answer.get("choice")
     if choice not in ps or ps[choice] < max(ps.values()) - 1e-6:
         raise ValueError("Jev choice must be a highest-probability option")
-    return {k: v / total for k, v in ps.items()}
+    return normalized
+
+
+def parse_persona_reply(text, spec):
+    """Strictly parse normalized option probabilities; old hard replies fail."""
+    obj = json.loads(text)
+    if not isinstance(obj, dict) or set(obj) != {i["key"] for i in spec["items"]}:
+        raise ValueError("Jev Persona reply must cover exactly the survey items")
+    return {i["key"]: probability_vector(obj[i["key"]], i["options"])
+            for i in spec["items"]}
+
+
+def aggregate_persona_probabilities(kind, answers, weights):
+    """Expected survey aggregate for the three supported affine instruments.
+
+    Expand each item marginal into fractional weighted responses, then call
+    the unmodified official arithmetic. Each row answers only one item, so
+    Michigan's five denominators each retain the original respondent weight.
+    This computes the mean without assuming independence between items or
+    people. These fractional rows MUST NOT be used to compute panel size/sd.
+    """
+    from . import personas
+    if kind not in {"approve_share", "net_approve_share", "umich_ics"}:
+        raise ValueError("Jev expectation requires an audited affine aggregate")
+    fractional, fractional_weights = {}, {}
+    for pid in sorted(answers):
+        if pid not in weights:
+            continue
+        for item, ps in answers[pid].items():
+            for option, probability in ps.items():
+                if probability == 0:
+                    continue
+                key = (pid, item, option)
+                fractional[key] = {item: option}
+                fractional_weights[key] = weights[pid] * probability
+    return personas.aggregate(kind, fractional, fractional_weights)
 
 
 def request_for(prompt, model):
@@ -104,7 +145,7 @@ def convert(data, request, edges):
     validated = {k: probabilities(answers[k], q["criteria"])
                  for k, q in request["questions"].items()}
     if edges is None:
-        return {k: answers[k]["choice"] for k in validated}
+        return validated
     ps = validated["forecast"]
     centres = [(a + b) / 2 for a, b in zip(edges, edges[1:])]
     mean = math.fsum(ps[f"bin_{i:03d}"] * x for i, x in enumerate(centres))

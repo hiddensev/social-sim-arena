@@ -160,6 +160,9 @@ def run(args):
     cfg = json.loads(args.config.read_text())
     if harness.model_id("jev") != cfg["model"] or personas.REPLICATES != 8 or harness.ALLOW_MOCK:
         raise ValueError("live model/panel/mock settings differ from the registered experiment")
+    if any(m.endswith("persona") for m in cfg["entrants"].values()) and (
+            harness.route("jev-zeroshot-persona")["params"]["adapter"] != cfg["persona_adapter"]):
+        raise ValueError("live Persona adapter differs from the registered experiment")
     snap = OfficialSnapshot()
     rounds = snap.read("questions/season0.json")["rounds"]
     resolved = snap.read("resolutions/resolved.json")

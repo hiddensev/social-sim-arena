@@ -2,6 +2,7 @@
   "owner": "hiddensev",
   "key_id": "k1",
   "model": "jev-1.13.0",
+  "persona_adapter": "jev-persona-expectation-v2",
   "series": ["yougov_approval", "civiqs_net_approval", "umich_sentiment"],
   "entrants": {
     "jev-direct": "jev",

@@ -126,6 +126,7 @@ MODELS = {
         # Included in call_identity: changing the output mapping invalidates
         # cached replies, even when the upstream text prompt is unchanged.
         "params": {"adapter": "jev-histogram200-hard-choice-v1"},
+        "persona_params": {"adapter": "jev-persona-expectation-v2"},
         "elicitations": ("direct", "persona"),
         "opt_in": True,  # local experiment, not part of the public season roster
     },
@@ -559,6 +560,10 @@ def route(entrant, via=None):
         raise ValueError(f"{entrant} is not a registered Route A participant")
 
     model = resolve(entrant)[0]
+    if model == "jev" and resolve(entrant)[2] == "persona" and via in (None, "direct"):
+        rt = _direct_route(model)
+        rt["params"].update(MODELS[model]["persona_params"])
+        return rt
     if via == "ppapi":
         if model not in PPAPI_MODELS:
             raise ValueError(f"{model} has no route on the sponsor's gateway")
@@ -2597,6 +2602,14 @@ def forecast_persona(entrant, r, history=None, previous=None):
 
     panel = personas.panel()
     weights = personas.weights_for(spec.get("population"))
+    # Jev supplies a categorical distribution instead of a generated answer.
+    # Keep this conversion isolated; every other model keeps the original path.
+    probability_answers = route(entrant)["api"] == "jev"
+    if probability_answers:
+        from .jev import parse_persona_reply, aggregate_persona_probabilities
+        parse_reply = lambda text: parse_persona_reply(text, spec)
+    else:
+        parse_reply = lambda text: parse_survey_reply(text, spec)
     prompts = {p["id"]: build_persona_prompt(p, spec) for p in panel}
     # One hash over the whole instrument, so adding a persona or reordering the
     # panel is a different question set and re-runs rather than reusing.
@@ -2620,7 +2633,7 @@ def forecast_persona(entrant, r, history=None, previous=None):
         # input hash, so the log is keyed per persona: an interrupted panel then
         # resumes the respondents it had left instead of re-buying all 192.
         parsed = _replayed(r["round_id"], entrant, ih,
-                           lambda t: parse_survey_reply(t, spec), persona=pid)
+                           parse_reply, persona=pid)
         if parsed is not None:
             with lock:
                 answers[pid] = parsed
@@ -2630,7 +2643,7 @@ def forecast_persona(entrant, r, history=None, previous=None):
             reply, usage = call_provider(entrant, prompts[pid], with_usage=True)
             _log_reply(r["round_id"], entrant, ih, prompts[pid], reply, usage,
                        persona=pid)
-            parsed = parse_survey_reply(reply, spec)
+            parsed = parse_reply(reply)
         except Exception as e:                 # noqa: BLE001 - collected below
             _log_failure(r["round_id"], entrant, ih, prompts[pid], e, persona=pid)
             with lock:
@@ -2651,7 +2664,8 @@ def forecast_persona(entrant, r, history=None, previous=None):
             f"{PERSONA_MIN_RESPONSE:.0%} floor. A panel this incomplete is "
             f"biased, not merely small. First failures: {failures[:3]}")
 
-    mean = personas.aggregate(spec["aggregate"], answers, weights)
+    mean = (aggregate_persona_probabilities(spec["aggregate"], answers, weights)
+            if probability_answers else personas.aggregate(spec["aggregate"], answers, weights))
     sd = personas.sd_for(weights, history, scale=spec.get("se_scale", 1.0))
     # How many respondents came out of the log rather than off the wire is part
     # of what this panel is: a run that resumed 190 of 192 bought two answers,
@@ -2660,7 +2674,8 @@ def forecast_persona(entrant, r, history=None, previous=None):
             f"{model_id(entrant)}, harness v1, via={route(entrant)['via']}, "
             f"effort={effort_label(entrant)}, "
             f"context={resolve(entrant)[1]} elicitation=persona, "
-            f"{len(answers)}/{len(panel)} respondents, "
+            + ("response=probability-expectation-v2, " if probability_answers else "")
+            + f"{len(answers)}/{len(panel)} respondents, "
             + (f"{len(replayed)} replayed, " if replayed else "")
             + f"{responded:.0%} of panel weight, "
             f"aggregate={spec['aggregate']}; in={ih}")

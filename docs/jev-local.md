@@ -71,12 +71,47 @@ Profiles and rankings are not implemented by this first scalar adapter.
 **Persona** (`jev-zeroshot-persona`, context `none`): the same panel (24 cells ×
 8 replicates), persona descriptions, survey questions and options go to Jev.
 Each survey item becomes one Choice; Michigan's five items share one request
-per persona. Jev's highest-probability `choice` supplies the single answer the
-original harness expects. The original weights, aggregates, minimum response
-threshold and sd estimator are unchanged. Full option probabilities are saved
-but not used as fractional respondents. A soft-probability aggregate would be
-a separate method change, not a drop-in replacement. Persona's final sd is
-still a harness estimate, not Jev's uncertainty about the population mean.
+per persona. The adapter returns each item's full normalized probability vector.
+The harness accepts this shape only for Jev and integrates it through the
+original survey arithmetic using fractional item weights `w_i * p_i(option)`.
+All other models keep the original single-answer parser and aggregation path.
+
+This is **probability-expectation-v2**, replacing the initial argmax mapping
+before any public predictions were filed. TypeSafe's `choice` is the maximum
+probability option; treating it as a sampled respondent collapses uncertainty.
+For example, a 60/40 approval distribution contributes 60% approval, not 100%.
+For the three supported affine survey formulas, probability aggregation equals
+the expected aggregate of sampled categorical answers. Marginal probabilities
+suffice for this mean even if answers across people/items are correlated.
+No random draws, seed search, outcome tuning or independence assumption is used.
+This does not establish that Jev's probabilities are calibrated human frequencies.
+
+The original real panel weights and **sd estimator are unchanged**. Fractional
+item rows are used only inside the mean calculation, never for panel size or sd.
+This preserves the original uncertainty convention for the comparison, including
+its conservative hard-response discretization term. It is not a new derivation
+of predictive variance: variance and joint outcome distributions would require
+additional assumptions/calibration. In general equal expected means do not imply
+equal predictive distributions or equal expected CRPS. Future nonlinear survey
+aggregators require a separate audit and are rejected by this adapter.
+
+The Persona adapter/cache identity changes to `jev-persona-expectation-v2`;
+Direct retains its original identity and outputs. Old argmax cache replies are
+not silently parsed as probability vectors. The recorded provider probabilities
+can be explicitly reconverted with verified prompt/request matches:
+
+```sh
+.venv/bin/python tools/replay_jev_probabilities.py \
+  --source-report cache/jev/full-backtest.json \
+  --source-replies cache/jev/replies \
+  --out cache/jev/expectation-v2-replay
+```
+
+This command blocks all HTTP, writes to a new directory, preserves the original
+records, and verifies that Direct and every sd stay unchanged. Ten rounds were
+recomputed from the same 1,930 saved replies; Persona mean CRPS became 1.313 for
+YouGov, 14.177 for Civiqs, and 15.041 for Michigan (3/5/2 rounds respectively).
+These are historical functional checks, not prospective arena scores.
 
 No Superforecasting entrant can be resolved for Jev. No generative model is
 used as a fallback. Jev is excluded from the default season roster unless
