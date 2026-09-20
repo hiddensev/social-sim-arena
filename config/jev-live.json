@@ -1,0 +1,11 @@
+{
+  "owner": "hiddensev",
+  "key_id": "k1",
+  "model": "jev-1.13.0",
+  "series": ["yougov_approval", "civiqs_net_approval", "umich_sentiment"],
+  "entrants": {
+    "jev-direct": "jev",
+    "jev-persona": "jev-zeroshot-persona"
+  },
+  "max_rounds_per_run": 4
+}

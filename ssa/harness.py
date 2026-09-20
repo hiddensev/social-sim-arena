@@ -120,6 +120,15 @@ GATEWAY = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 GATEWAY_ENTRANTS = ("qwen-3.7", "qwen-3.8", "kimi", "glm", "minimax")
 
 MODELS = {
+    "jev": {
+        "env": "TYPESAFE_API_KEY", "name": "Jev 1.13", "api": "jev",
+        "base": "https://api.typesafe.ai/v1", "model": "jev-1.13.0",
+        # Included in call_identity: changing the output mapping invalidates
+        # cached replies, even when the upstream text prompt is unchanged.
+        "params": {"adapter": "jev-histogram200-hard-choice-v1"},
+        "elicitations": ("direct", "persona"),
+        "opt_in": True,  # local experiment, not part of the public season roster
+    },
     # --- OpenAI: all three GPT-5.6 variants -------------------------------
     "gpt-5.6-luna": {
         "env": "OPENAI_API_KEY", "name": "GPT-5.6 Luna", "api": "openai",
@@ -1080,6 +1089,8 @@ ELICITATION_VARIANTS = ("persona", "superfc", "news")
 
 def entrant_id(model, context=DEFAULT_CONTEXT, elicitation=DEFAULT_ELICITATION):
     """model + condition -> the id used on disk, in the leaderboard, everywhere."""
+    if elicitation not in MODELS.get(model, {}).get("elicitations", ELICITATION):
+        raise ValueError(f"{model} does not support {elicitation}")
     if context not in CONTEXT_SUFFIX:
         raise ValueError(f"unknown context {context!r}; known: {sorted(CONTEXT_SUFFIX)}")
     if elicitation not in ELICITATION_SUFFIX:
@@ -1163,6 +1174,8 @@ def cell_entrants(cells, models=None):
         for m in models:
             if m not in MODELS:
                 continue
+            if eli not in MODELS[m].get("elicitations", ELICITATION):
+                continue
             out.append((entrant_id(m, ctx, eli), m, ctx, eli))
     return out
 
@@ -1211,7 +1224,8 @@ def allowed_models():
 def active_models():
     out = [m for m in MODELS if m not in PENDING_ACTIVATION]
     allow = allowed_models()
-    return [m for m in out if m in allow] if allow is not None else out
+    return ([m for m in out if m in allow] if allow is not None else
+            [m for m in out if not MODELS[m].get("opt_in")])
 
 
 def season_entrants():
@@ -1238,7 +1252,8 @@ def resolve(entrant_id_):
             # `<m>-persona` resolves to recent10 x persona while
             # `entrant_id` refuses to produce it, and the same cell has two
             # names -- exactly the duplication ELICITATION_CONTEXTS prevents.
-            if model in MODELS and ctx in ELICITATION_CONTEXTS[eli]:
+            if (model in MODELS and ctx in ELICITATION_CONTEXTS[eli]
+                    and eli in MODELS[model].get("elicitations", ELICITATION)):
                 return model, ctx, eli
     raise KeyError(f"unknown entrant id: {entrant_id_!r}")
 
@@ -1851,8 +1866,10 @@ def call_provider(entrant, prompt, with_usage=False, context=None, via=None):
     mid = model_id(entrant, via)
     base = base_url(entrant, via)
     api = rt["api"]
+    from .jev import call as _call_jev
     fn = {"openai": _call_openai, "anthropic": _call_anthropic,
-          "gemini": _call_gemini, "agent": _call_agent}.get(api)
+          "gemini": _call_gemini, "agent": _call_agent,
+          "jev": _call_jev}.get(api)
     if fn is None:
         raise ValueError("unknown api: " + api)
     with _provider_slot(entrant, via):

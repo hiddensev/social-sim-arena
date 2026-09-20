@@ -1,0 +1,55 @@
+name: jev-live-submissions
+on:
+  schedule:
+    - cron: '37 */2 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: jev-live-submissions
+  cancel-in-progress: false
+
+jobs:
+  forecast:
+    if: github.repository == 'hiddensev/social-sim-arena'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
+      SSA_JEV_SIGNING_KEY_B64: ${{ secrets.SSA_JEV_SIGNING_KEY_B64 }}
+      SSA_JEV_CACHE_AGE_KEY: ${{ secrets.SSA_JEV_CACHE_AGE_KEY }}
+      GH_TOKEN: ${{ github.token }}
+      SSA_MODELS: jev
+      SSA_MODEL_JEV: jev-1.13.0
+      SSA_PERSONA_REPLICATES: '8'
+      SSA_ALLOW_MOCK: '0'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Verify adapter and submission gates
+        run: python -m unittest tests.test_jev tests.test_jev_live -q
+      - uses: actions/cache/restore@v4
+        with:
+          path: .local/jev/encrypted/state.age
+          key: jev-live-v1-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: jev-live-v1-
+      - name: Restore private evidence
+        id: private_restore
+        run: python tools/jev_live_cache.py unpack
+      - name: Submit eligible future rounds
+        run: python tools/run_jev_live.py --execute
+      - name: Encrypt private evidence
+        id: private_pack
+        if: always() && steps.private_restore.outcome == 'success'
+        run: python tools/jev_live_cache.py pack
+      - uses: actions/cache/save@v4
+        if: always() && steps.private_pack.outcome == 'success'
+        with:
+          path: .local/jev/encrypted/state.age
+          key: jev-live-v1-${{ github.run_id }}-${{ github.run_attempt }}
