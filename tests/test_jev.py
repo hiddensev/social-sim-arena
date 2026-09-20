@@ -122,7 +122,7 @@ class JevTests(unittest.TestCase):
         # Two mutually exclusive whole-panel scenarios: strong correlation
         # across people and Michigan items. Marginals suffice for the mean.
         weights = {"p1": .27, "p2": .73}
-        for sid in runner.DEFAULT_SERIES:
+        for sid in (*runner.DEFAULT_SERIES, "yougov_generic_margin"):
             spec = series.survey(sid)
             scenarios = [
                 {pid: {i["key"]: i["options"][(which + n) % 3]

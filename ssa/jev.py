@@ -57,7 +57,7 @@ def parse_persona_reply(text, spec):
 
 
 def aggregate_persona_probabilities(kind, answers, weights):
-    """Expected survey aggregate for the three supported affine instruments.
+    """Expected survey aggregate for the audited affine instruments.
 
     Expand each item marginal into fractional weighted responses, then call
     the unmodified official arithmetic. Each row answers only one item, so
@@ -66,7 +66,7 @@ def aggregate_persona_probabilities(kind, answers, weights):
     people. These fractional rows MUST NOT be used to compute panel size/sd.
     """
     from . import personas
-    if kind not in {"approve_share", "net_approve_share", "umich_ics"}:
+    if kind not in {"approve_share", "net_approve_share", "party_margin", "umich_ics"}:
         raise ValueError("Jev expectation requires an audited affine aggregate")
     fractional, fractional_weights = {}, {}
     for pid in sorted(answers):
