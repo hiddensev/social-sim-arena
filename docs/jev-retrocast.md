@@ -1,4 +1,12 @@
-# Jev full historical target replay
+# Jev replay of the 2026-08-09 historical experiment
+
+Scope clarification: this is the complete target set of **one historical run**,
+not a fixed or exhaustive evaluation dataset for the whole arena. Our earlier
+10-round replay is a subset of our three selected Season 0 series, not a subset
+of these 339 targets. Civiqs was registered on 2026-08-12, after this run.
+The official competition evaluates forecasts submitted before each future
+question locks, against the season manifest and official resolutions.
+Historical replays are development diagnostics, not prospective entries.
 
 This experiment covers all **339 distinct (series, date) targets** recorded in
 `backtest/runs/2026-08-09.jsonl`. It also reports the **22 targets jointly
